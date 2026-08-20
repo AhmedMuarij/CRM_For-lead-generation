@@ -70,27 +70,22 @@ and backend deployments:
 
 ### 📊 Dashboard
 
-```{=html}
-<!-- Replace this with your screenshot -->
-```
-```{=html}
-<!-- ![Dashboard](screenshots/dashboard.png) -->
-```
+<img width="1353" height="604" alt="Screenshot 2026-08-21 034330" src="https://github.com/user-attachments/assets/70922ef7-3c80-4686-b3dc-f09f954ed86f" />
+
+
 ### 🎯 Lead Management
 
-```{=html}
-<!-- ![Lead Management](screenshots/leads.png) -->
-```
+<img width="1365" height="605" alt="Screenshot 2026-08-21 034438" src="https://github.com/user-attachments/assets/269c9223-6ffd-4b96-a4dd-c87888d0ba76" />
+
 ### 📞 Calls & Follow-ups
 
-```{=html}
-<!-- ![Follow-ups](screenshots/follow-ups.png) -->
-```
+<img width="1365" height="606" alt="Screenshot 2026-08-21 034413" src="https://github.com/user-attachments/assets/01a13bf7-fcfe-4884-ba8b-5ae9257542b2" />
+
+
 ### 📈 Reports & Analytics
 
-```{=html}
-<!-- ![Reports](screenshots/reports.png) -->
-```
+<img width="1366" height="611" alt="Screenshot 2026-08-21 034557" src="https://github.com/user-attachments/assets/920d24a5-1672-49b3-8dd2-4456582575c3" />
+
 
 ------------------------------------------------------------------------
 
