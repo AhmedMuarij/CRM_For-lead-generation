@@ -1,4 +1,5 @@
 // ─── Enums ────────────────────────────────────────────────────
+
 export type UserRole = "MANAGER" | "EMPLOYEE";
 
 export type LeadStatus =
@@ -20,9 +21,14 @@ export type CallOutcome =
     | "WRONG_NUMBER"
     | "OTHER";
 
-export type FollowUpStatus = "SCHEDULED" | "COMPLETED" | "OVERDUE" | "CANCELLED";
+export type FollowUpStatus =
+    | "SCHEDULED"
+    | "COMPLETED"
+    | "OVERDUE"
+    | "CANCELLED";
 
 // ─── Models ───────────────────────────────────────────────────
+
 export interface User {
     id: number;
     name: string;
@@ -138,6 +144,7 @@ export interface LeadNote {
 }
 
 // ─── Dashboard Types ──────────────────────────────────────────
+
 export interface EmployeeDashboard {
     stats: {
         total: number;
