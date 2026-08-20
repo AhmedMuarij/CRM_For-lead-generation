@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
+import axios from "axios";
 import { AppShell } from "@/components/layout";
 import api from "@/lib/api";
 import { User } from "@/types";
-import { format } from "date-fns";
 import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
@@ -23,7 +23,7 @@ export default function EmployeesPage() {
     useEffect(() => {
         if (!isManager) { router.push("/dashboard"); return; }
         api.get("/api/users").then(r => setEmployees(r.data));
-    }, [isManager]);
+    }, [isManager, router]);
 
     async function createEmployee(e: React.FormEvent) {
         e.preventDefault();
@@ -34,8 +34,9 @@ export default function EmployeesPage() {
             toast.success("Employee created!");
             setShowForm(false); setName(""); setEmail(""); setPassword("");
             api.get("/api/users").then(r => setEmployees(r.data));
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || "Failed");
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err) ? err.response?.data?.detail : undefined;
+            toast.error(message || "Failed");
         } finally { setSubmitting(false); }
     }
 

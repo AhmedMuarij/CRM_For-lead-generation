@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import axios from "axios";
 import { AppShell } from "@/components/layout";
 import api from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -9,17 +10,40 @@ import toast from "react-hot-toast";
 import { Import, CheckCircle2, AlertTriangle, History } from "lucide-react";
 import { format } from "date-fns";
 
+interface ImportError {
+    row: number;
+    error: string;
+}
+
+interface ImportResult {
+    rows_found: number;
+    new_leads: number;
+    duplicates: number;
+    errors: number;
+    error_details: ImportError[];
+}
+
+interface ImportLogEntry {
+    id: number;
+    imported_by: string;
+    rows_found: number;
+    new_leads: number;
+    duplicates: number;
+    errors: number;
+    imported_at: string;
+}
+
 export default function ImportPage() {
     const { isManager, loading } = useAuth();
     const router = useRouter();
     const [importing, setImporting] = useState(false);
-    const [result, setResult] = useState<any>(null);
-    const [history, setHistory] = useState<any[]>([]);
+    const [result, setResult] = useState<ImportResult | null>(null);
+    const [history, setHistory] = useState<ImportLogEntry[]>([]);
 
     useEffect(() => {
         if (!loading && !isManager) router.push("/dashboard");
         if (isManager) api.get("/api/import/history").then(r => setHistory(r.data));
-    }, [isManager, loading]);
+    }, [isManager, loading, router]);
 
     async function runImport() {
         setImporting(true); setResult(null);
@@ -28,8 +52,9 @@ export default function ImportPage() {
             setResult(r.data);
             toast.success(`Import complete! ${r.data.new_leads} new leads added.`);
             api.get("/api/import/history").then(r => setHistory(r.data));
-        } catch (e: any) {
-            toast.error(e?.response?.data?.detail || "Import failed. Check Google Sheet configuration.");
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err) ? err.response?.data?.detail : undefined;
+            toast.error(message || "Import failed. Check Google Sheet configuration.");
         } finally { setImporting(false); }
     }
 
@@ -82,7 +107,7 @@ export default function ImportPage() {
                             <div className="mt-4">
                                 <p className="text-xs font-semibold text-red-600 flex items-center gap-1 mb-2"><AlertTriangle className="w-3 h-3" /> Error Details</p>
                                 <div className="space-y-1 max-h-40 overflow-y-auto">
-                                    {result.error_details.map((e: any) => (
+                                    {result.error_details.map((e: ImportError) => (
                                         <p key={e.row} className="text-xs text-red-500 bg-red-50 px-3 py-1.5 rounded-lg">Row {e.row}: {e.error}</p>
                                     ))}
                                 </div>

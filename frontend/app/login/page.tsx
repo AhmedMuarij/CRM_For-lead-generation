@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import axios from "axios";
 import { useAuth } from "@/lib/auth-context";
 import toast from "react-hot-toast";
 import { Zap, Eye, EyeOff } from "lucide-react";
@@ -17,8 +18,9 @@ export default function LoginPage() {
         setLoading(true);
         try {
             await login(email, password);
-        } catch (err: any) {
-            toast.error(err?.response?.data?.detail || "Login failed. Check your credentials.");
+        } catch (err: unknown) {
+            const message = axios.isAxiosError(err) ? err.response?.data?.detail : undefined;
+            toast.error(message || "Login failed. Check your credentials.");
         } finally {
             setLoading(false);
         }

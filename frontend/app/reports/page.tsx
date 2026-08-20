@@ -6,27 +6,47 @@ import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { BarChart3, TrendingUp } from "lucide-react";
 
+interface ReportSummary {
+    total_leads: number;
+    won: number;
+    lost: number;
+    conversion_rate: number;
+    status_breakdown: Record<string, number>;
+    date_range: { from: string | null; to: string | null };
+}
+
+interface EmployeePerformance {
+    employee_id: number;
+    employee_name: string;
+    active: boolean;
+    assigned_leads: number;
+    total_calls: number;
+    won: number;
+    lost: number;
+    conversion_rate: number;
+}
+
 export default function ReportsPage() {
     const { isManager, loading } = useAuth();
     const router = useRouter();
-    const [summary, setSummary] = useState<any>(null);
-    const [perf, setPerf] = useState<any>(null);
+    const [summary, setSummary] = useState<ReportSummary | null>(null);
+    const [perf, setPerf] = useState<{ employees: EmployeePerformance[] } | null>(null);
     const [fromDate, setFromDate] = useState("");
     const [toDate, setToDate] = useState("");
 
     useEffect(() => {
         if (!loading && !isManager) router.push("/dashboard");
-    }, [isManager, loading]);
+    }, [isManager, loading, router]);
 
     function load() {
-        const params: any = {};
+        const params: Record<string, string> = {};
         if (fromDate) params.from_date = fromDate;
         if (toDate) params.to_date = toDate;
         api.get("/api/reports/summary", { params }).then(r => setSummary(r.data));
         api.get("/api/reports/employee-performance", { params }).then(r => setPerf(r.data));
     }
 
-    useEffect(() => { if (isManager) load(); }, [isManager]);
+    useEffect(() => { if (isManager) load(); }, [isManager]); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
         <AppShell>
@@ -99,7 +119,7 @@ export default function ReportsPage() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
-                                    {perf.employees.map((e: any) => (
+                                    {perf.employees.map((e: EmployeePerformance) => (
                                         <tr key={e.employee_id} className="hover:bg-slate-50">
                                             <td className="px-4 py-3 font-medium text-slate-800">{e.employee_name} {!e.active && <span className="text-xs text-slate-400">(inactive)</span>}</td>
                                             <td className="px-4 py-3 text-slate-600">{e.assigned_leads}</td>

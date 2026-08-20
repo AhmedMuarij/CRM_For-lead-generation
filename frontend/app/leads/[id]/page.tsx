@@ -1,20 +1,21 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import axios from "axios";
 import { AppShell } from "@/components/layout";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
 import api from "@/lib/api";
-import { Lead, CallLog, FollowUp, LeadNote, User, LeadStatus, CallOutcome } from "@/types";
-import { format, formatDistanceToNow } from "date-fns";
+import { Lead, CallLog, LeadNote, User, LeadStatus, CallOutcome } from "@/types";
+import { format } from "date-fns";
 import { useParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { Phone, Copy, PhoneCall, Clock, StickyNote, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Phone, Copy, PhoneCall, Clock, StickyNote, AlertTriangle, CheckCircle2, LucideIcon } from "lucide-react";
 import clsx from "clsx";
 
 const STATUS_OPTIONS: LeadStatus[] = ["NEW", "CONTACTED", "FOLLOW_UP", "PENDING", "NO_RESPONSE", "WON", "LOST"];
 const OUTCOME_OPTIONS: CallOutcome[] = ["INTERESTED", "NOT_INTERESTED", "FOLLOW_UP_REQUIRED", "PENDING", "NO_ANSWER", "BUSY", "WRONG_NUMBER", "OTHER"];
 
-function Section({ title, icon: Icon, children }: { title: string; icon: any; children: React.ReactNode }) {
+function Section({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
@@ -28,10 +29,9 @@ function Section({ title, icon: Icon, children }: { title: string; icon: any; ch
 
 export default function LeadDetailPage() {
     const { id } = useParams<{ id: string }>();
-    const { user, isManager } = useAuth();
+    const { isManager } = useAuth();
     const [lead, setLead] = useState<Lead | null>(null);
     const [calls, setCalls] = useState<CallLog[]>([]);
-    const [followUps, setFollowUps] = useState<FollowUp[]>([]);
     const [notes, setNotes] = useState<LeadNote[]>([]);
     const [employees, setEmployees] = useState<User[]>([]);
 
@@ -49,22 +49,26 @@ export default function LeadDetailPage() {
     const [newStatus, setNewStatus] = useState<LeadStatus | "">("");
     const [assignTo, setAssignTo] = useState("");
 
-    const reload = () => {
+    const reload = useCallback(() => {
         api.get(`/api/leads/${id}`).then(r => { setLead(r.data); setNewStatus(r.data.status); });
         api.get(`/api/leads/${id}/calls`).then(r => setCalls(r.data));
         api.get(`/api/follow-ups`, { params: { lead_id: id } }).catch(() => { });
         api.get(`/api/leads/${id}/notes`).then(r => setNotes(r.data));
-    };
+    }, [id]);
 
-    useEffect(() => { reload(); }, [id]);
+    useEffect(() => { reload(); }, [reload]);
     useEffect(() => { if (isManager) api.get("/api/users").then(r => setEmployees(r.data.filter((u: User) => u.role === "EMPLOYEE" && u.active))); }, [isManager]);
+
+    function errorMessage(err: unknown, fallback: string) {
+        return (axios.isAxiosError(err) ? err.response?.data?.detail : undefined) || fallback;
+    }
 
     async function submitCall() {
         try {
             await api.post(`/api/leads/${id}/calls`, { call_datetime: new Date(callDt).toISOString(), outcome: callOutcome, notes: callNotes });
             toast.success("Call logged!");
             setLogCallOpen(false); setCallNotes(""); reload();
-        } catch (e: any) { toast.error(e?.response?.data?.detail || "Failed"); }
+        } catch (err) { toast.error(errorMessage(err, "Failed")); }
     }
 
     async function submitFollowUp() {
@@ -73,7 +77,7 @@ export default function LeadDetailPage() {
             await api.post(`/api/leads/${id}/follow-ups`, { scheduled_at: new Date(fuDate).toISOString(), notes: fuNotes });
             toast.success("Follow-up scheduled!");
             setFuOpen(false); setFuNotes(""); setFuDate(""); reload();
-        } catch (e: any) { toast.error(e?.response?.data?.detail || "Failed"); }
+        } catch (err) { toast.error(errorMessage(err, "Failed")); }
     }
 
     async function submitNote() {
@@ -81,7 +85,7 @@ export default function LeadDetailPage() {
         try {
             await api.post(`/api/leads/${id}/notes`, { content: noteText });
             toast.success("Note added"); setNoteText(""); reload();
-        } catch (e: any) { toast.error("Failed"); }
+        } catch { toast.error("Failed"); }
     }
 
     async function updateStatus() {
@@ -93,7 +97,7 @@ export default function LeadDetailPage() {
         try {
             await api.patch(`/api/leads/${id}`, { status: newStatus });
             toast.success("Status updated"); reload();
-        } catch (e: any) { toast.error(e?.response?.data?.detail || "Failed"); }
+        } catch (err) { toast.error(errorMessage(err, "Failed")); }
     }
 
     async function assignLead() {
@@ -101,7 +105,7 @@ export default function LeadDetailPage() {
         try {
             await api.post(`/api/leads/${id}/assign`, { employee_id: parseInt(assignTo) });
             toast.success("Lead assigned"); setAssignTo(""); reload();
-        } catch (e: any) { toast.error("Failed"); }
+        } catch { toast.error("Failed"); }
     }
 
     if (!lead) return <AppShell><div className="p-6 text-slate-400">Loading…</div></AppShell>;
@@ -177,7 +181,7 @@ export default function LeadDetailPage() {
                                                     c.outcome === "NOT_INTERESTED" ? "bg-red-100 text-red-600" :
                                                         "bg-slate-100 text-slate-600"
                                             )}>{c.outcome.replace("_", " ")}</span>
-                                            {c.notes && <p className="text-xs text-slate-600 mt-2 italic">"{c.notes}"</p>}
+                                            {c.notes && <p className="text-xs text-slate-600 mt-2 italic">&quot;{c.notes}&quot;</p>}
                                             <p className="text-xs text-slate-400 mt-1">By {c.employee_name}</p>
                                         </div>
                                     ))}

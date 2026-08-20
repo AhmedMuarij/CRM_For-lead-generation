@@ -6,6 +6,13 @@ import { useAuth } from "@/lib/auth-context";
 import { useRouter, useParams } from "next/navigation";
 import api from "@/lib/api";
 import { User, LeadListItem } from "@/types";
+
+interface EmployeeStats {
+    total_assigned: number;
+    won: number;
+    lost: number;
+    overdue: number;
+}
 import { format } from "date-fns";
 import Link from "next/link";
 import { ArrowLeft, Users } from "lucide-react";
@@ -16,7 +23,7 @@ export default function EmployeeDetailPage() {
     const router = useRouter();
     const [employee, setEmployee] = useState<User | null>(null);
     const [leads, setLeads] = useState<LeadListItem[]>([]);
-    const [stats, setStats] = useState<any>(null);
+    const [stats, setStats] = useState<EmployeeStats | null>(null);
 
     useEffect(() => {
         if (!loading && !isManager) router.push("/dashboard");
@@ -24,7 +31,7 @@ export default function EmployeeDetailPage() {
         api.get(`/api/users/${id}`).then(r => setEmployee(r.data));
         api.get(`/api/users/${id}/stats`).then(r => setStats(r.data));
         api.get("/api/leads", { params: { employee_id: id, page_size: 100 } }).then(r => setLeads(r.data.items));
-    }, [isManager, loading, id]);
+    }, [isManager, loading, id, router]);
 
     if (!employee) return <AppShell><div className="p-6 text-slate-400">Loading…</div></AppShell>;
 

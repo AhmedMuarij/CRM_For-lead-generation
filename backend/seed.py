@@ -11,6 +11,12 @@ import os
 import random
 from datetime import datetime, timedelta
 
+# Windows consoles default to a non-UTF-8 codepage (e.g. cp1252), which can't
+# encode the emoji in the log messages below — reconfigure stdout so this
+# script runs the same on Windows as it does on Linux/Mac.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import SessionLocal, engine

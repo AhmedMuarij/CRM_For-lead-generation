@@ -7,7 +7,7 @@ import api from "@/lib/api";
 import { PaginatedLeads, LeadListItem, User, LeadStatus } from "@/types";
 import { format } from "date-fns";
 import Link from "next/link";
-import { Search, Filter, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 
 const STATUSES: LeadStatus[] = ["NEW", "CONTACTED", "FOLLOW_UP", "PENDING", "NO_RESPONSE", "WON", "LOST"];

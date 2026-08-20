@@ -8,8 +8,7 @@ import { EmployeeDashboard, ManagerDashboard, FollowUpSummary } from "@/types";
 import { formatDistanceToNow, format } from "date-fns";
 import Link from "next/link";
 import {
-    AlertTriangle, Clock, Plus, PhoneCall, TrendingUp, Users,
-    CheckCircle2, XCircle, LayoutDashboard
+    AlertTriangle, Clock, Plus, Users, LayoutDashboard
 } from "lucide-react";
 
 function OverdueRow({ fu }: { fu: FollowUpSummary }) {
