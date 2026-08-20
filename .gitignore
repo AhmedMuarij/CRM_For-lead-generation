@@ -1,0 +1,16 @@
+# Root — exclude secrets and local artifacts
+.DS_Store
+Thumbs.db
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/ev_crm_test.db
+backend/.env
+backend/test_api.py
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local

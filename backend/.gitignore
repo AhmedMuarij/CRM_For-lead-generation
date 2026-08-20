@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Env files
+.env
+!.env.example
+!.env.railway
+
+# DB
+*.db
+*.sqlite3
+ev_crm_test.db
+
+# Test artifacts
+test_api.py
+
+# IDE
+.vscode/
+.idea/
