@@ -1,0 +1,10 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+tests/
+*.db
+*.sqlite3
+.env
+requirements-dev.txt
+seed.py

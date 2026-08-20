@@ -15,8 +15,18 @@ class Settings(BaseSettings):
     GOOGLE_SERVICE_ACCOUNT_JSON: str = ""
     GOOGLE_SHEET_ID: str = ""
 
-    # CORS
+    # CORS — comma-separated list of allowed frontend origins.
     FRONTEND_ORIGIN: str = "http://localhost:3000"
+    # Optional regex for dynamic origins, e.g. Vercel preview deployments:
+    #   https://ev-crm-.*-myteam\.vercel\.app
+    FRONTEND_ORIGIN_REGEX: str = ""
+
+    @property
+    def cors_origins(self) -> list[str]:
+        origins = [o.strip() for o in self.FRONTEND_ORIGIN.split(",") if o.strip()]
+        if "http://localhost:3000" not in origins:
+            origins.append("http://localhost:3000")
+        return origins
 
     class Config:
         env_file = ".env"

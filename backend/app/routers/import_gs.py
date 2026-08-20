@@ -72,14 +72,29 @@ def _map_row(row: dict) -> dict:
 
 
 def _get_gc():
-    """Return authenticated gspread client."""
+    """Return authenticated gspread client.
+
+    GOOGLE_SERVICE_ACCOUNT_JSON may be either a path to a key file (local
+    dev) or the raw JSON of the key itself — serverless platforms have a
+    read-only filesystem, so there the credentials arrive as an env var.
+    """
     import gspread
     from google.oauth2.service_account import Credentials
     scopes = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds_path = settings.GOOGLE_SERVICE_ACCOUNT_JSON
-    if not creds_path or not os.path.exists(creds_path):
+    raw = (settings.GOOGLE_SERVICE_ACCOUNT_JSON or "").strip()
+    if not raw:
         raise HTTPException(status_code=500, detail="Google service account credentials not configured")
-    creds = Credentials.from_service_account_file(creds_path, scopes=scopes)
+
+    if raw.startswith("{"):
+        try:
+            info = json.loads(raw)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON")
+        creds = Credentials.from_service_account_info(info, scopes=scopes)
+    else:
+        if not os.path.exists(raw):
+            raise HTTPException(status_code=500, detail="Google service account key file not found")
+        creds = Credentials.from_service_account_file(raw, scopes=scopes)
     return gspread.authorize(creds)
 
 

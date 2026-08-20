@@ -8,15 +8,19 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import get_settings
-from app.database import Base
+from app.database import Base, DATABASE_URL
 # Import all models so Alembic discovers them
 import app.models  # noqa: F401
 
 config = context.config
 settings = get_settings()
 
-# Override the sqlalchemy.url with our env-based URL
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Override the sqlalchemy.url with our env-based URL. DATABASE_URL is the
+# scheme-normalized value the app itself uses, so migrations and runtime can
+# never disagree about which database they mean. The `%` doubling is required
+# because ConfigParser treats a lone `%` as interpolation syntax — URL-encoded
+# characters in a password would otherwise raise here.
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
