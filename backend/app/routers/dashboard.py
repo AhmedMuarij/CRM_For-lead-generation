@@ -1,22 +1,40 @@
 from datetime import datetime, date
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.lead import Lead, LeadStatus
 from app.models.follow_up import FollowUp, FollowUpStatus
-from app.models.call import Call
 from app.auth.dependencies import get_current_user
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-def _status_count(db, status, employee_id=None):
-    q = db.query(func.count(Lead.id)).filter(Lead.status == status)
-    if employee_id:
+def _status_counts(db: Session, employee_id: int | None = None) -> dict[str, int]:
+    """One GROUP BY query instead of one COUNT per status."""
+    q = db.query(Lead.status, func.count(Lead.id)).group_by(Lead.status)
+    if employee_id is not None:
         q = q.filter(Lead.assigned_employee_id == employee_id)
-    return q.scalar() or 0
+    counts = {s.value: 0 for s in LeadStatus}
+    for status, count in q.all():
+        counts[status.value] = count
+    return counts
+
+
+def _bucket_follow_ups(scheduled_ats: list[datetime], now: datetime, today_start: datetime, today_end: datetime):
+    """Bucket a list of scheduled_at values into overdue/today/upcoming counts in
+    Python — cheaper than three separate range-filtered COUNT queries, and the
+    portable way to do it across SQLite (tests) and Postgres (prod)."""
+    overdue = today = upcoming = 0
+    for dt in scheduled_ats:
+        if dt < now:
+            overdue += 1
+        elif today_start <= dt <= today_end:
+            today += 1
+        elif dt > today_end:
+            upcoming += 1
+    return overdue, today, upcoming
 
 
 @router.get("/employee")
@@ -29,33 +47,16 @@ def employee_dashboard(
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
 
-    total = db.query(func.count(Lead.id)).filter(Lead.assigned_employee_id == eid).scalar() or 0
-    new = _status_count(db, LeadStatus.NEW, eid)
-    contacted = _status_count(db, LeadStatus.CONTACTED, eid)
-    follow_up = _status_count(db, LeadStatus.FOLLOW_UP, eid)
-    pending = _status_count(db, LeadStatus.PENDING, eid)
-    no_response = _status_count(db, LeadStatus.NO_RESPONSE, eid)
-    won = _status_count(db, LeadStatus.WON, eid)
-    lost = _status_count(db, LeadStatus.LOST, eid)
+    counts = _status_counts(db, eid)
+    total = sum(counts.values())
 
-    overdue_count = db.query(func.count(FollowUp.id)).filter(
-        FollowUp.employee_id == eid,
-        FollowUp.status == FollowUpStatus.SCHEDULED,
-        FollowUp.scheduled_at < now,
-    ).scalar() or 0
-
-    today_count = db.query(func.count(FollowUp.id)).filter(
-        FollowUp.employee_id == eid,
-        FollowUp.status == FollowUpStatus.SCHEDULED,
-        FollowUp.scheduled_at >= today_start,
-        FollowUp.scheduled_at <= today_end,
-    ).scalar() or 0
-
-    upcoming_count = db.query(func.count(FollowUp.id)).filter(
-        FollowUp.employee_id == eid,
-        FollowUp.status == FollowUpStatus.SCHEDULED,
-        FollowUp.scheduled_at > today_end,
-    ).scalar() or 0
+    scheduled_ats = [
+        row[0] for row in db.query(FollowUp.scheduled_at).filter(
+            FollowUp.employee_id == eid,
+            FollowUp.status == FollowUpStatus.SCHEDULED,
+        ).all()
+    ]
+    overdue_count, today_count, upcoming_count = _bucket_follow_ups(scheduled_ats, now, today_start, today_end)
 
     # Priority lists
     overdue_leads = (
@@ -118,13 +119,13 @@ def employee_dashboard(
     return {
         "stats": {
             "total": total,
-            "new": new,
-            "contacted": contacted,
-            "follow_up": follow_up,
-            "pending": pending,
-            "no_response": no_response,
-            "won": won,
-            "lost": lost,
+            "new": counts[LeadStatus.NEW.value],
+            "contacted": counts[LeadStatus.CONTACTED.value],
+            "follow_up": counts[LeadStatus.FOLLOW_UP.value],
+            "pending": counts[LeadStatus.PENDING.value],
+            "no_response": counts[LeadStatus.NO_RESPONSE.value],
+            "won": counts[LeadStatus.WON.value],
+            "lost": counts[LeadStatus.LOST.value],
             "overdue": overdue_count,
             "today_follow_ups": today_count,
             "upcoming": upcoming_count,
@@ -144,53 +145,69 @@ def manager_dashboard(
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
 
-    # Overall stats
-    total = db.query(func.count(Lead.id)).scalar() or 0
-    overdue_total = db.query(func.count(FollowUp.id)).filter(
-        FollowUp.status == FollowUpStatus.SCHEDULED,
-        FollowUp.scheduled_at < now,
-    ).scalar() or 0
-    today_total = db.query(func.count(FollowUp.id)).filter(
-        FollowUp.status == FollowUpStatus.SCHEDULED,
-        FollowUp.scheduled_at >= today_start,
-        FollowUp.scheduled_at <= today_end,
-    ).scalar() or 0
+    # Overall stats — 2 queries total instead of 1 (total) + 2 (date ranges) + 7 (per status).
+    status_counts = _status_counts(db)
+    total = sum(status_counts.values())
 
-    status_counts = {}
-    for s in LeadStatus:
-        status_counts[s.value.lower()] = _status_count(db, s)
+    all_scheduled = [
+        row[0] for row in db.query(FollowUp.scheduled_at)
+        .filter(FollowUp.status == FollowUpStatus.SCHEDULED).all()
+    ]
+    overdue_total, today_total, _ = _bucket_follow_ups(all_scheduled, now, today_start, today_end)
 
-    # Per-employee performance
+    # Per-employee performance — 2 queries total instead of 9 per employee.
     employees = db.query(User).filter(User.role == UserRole.EMPLOYEE, User.active == True).all()
-    emp_perf = []
-    for emp in employees:
-        eid = emp.id
-        emp_total = db.query(func.count(Lead.id)).filter(Lead.assigned_employee_id == eid).scalar() or 0
-        emp_overdue = db.query(func.count(FollowUp.id)).filter(
-            FollowUp.employee_id == eid,
-            FollowUp.status == FollowUpStatus.SCHEDULED,
-            FollowUp.scheduled_at < now,
-        ).scalar() or 0
-        emp_perf.append({
+    employee_ids = [e.id for e in employees]
+
+    per_emp_status: dict[int, dict[str, int]] = {eid: {s.value: 0 for s in LeadStatus} for eid in employee_ids}
+    if employee_ids:
+        rows = (
+            db.query(Lead.assigned_employee_id, Lead.status, func.count(Lead.id))
+            .filter(Lead.assigned_employee_id.in_(employee_ids))
+            .group_by(Lead.assigned_employee_id, Lead.status)
+            .all()
+        )
+        for eid, status, count in rows:
+            per_emp_status[eid][status.value] = count
+
+    per_emp_overdue: dict[int, int] = {eid: 0 for eid in employee_ids}
+    if employee_ids:
+        overdue_rows = (
+            db.query(FollowUp.employee_id, func.count(FollowUp.id))
+            .filter(
+                FollowUp.employee_id.in_(employee_ids),
+                FollowUp.status == FollowUpStatus.SCHEDULED,
+                FollowUp.scheduled_at < now,
+            )
+            .group_by(FollowUp.employee_id)
+            .all()
+        )
+        for eid, count in overdue_rows:
+            per_emp_overdue[eid] = count
+
+    emp_perf = [
+        {
             "employee_id": emp.id,
             "employee_name": emp.name,
-            "assigned": emp_total,
-            "new": _status_count(db, LeadStatus.NEW, eid),
-            "contacted": _status_count(db, LeadStatus.CONTACTED, eid),
-            "follow_up": _status_count(db, LeadStatus.FOLLOW_UP, eid),
-            "pending": _status_count(db, LeadStatus.PENDING, eid),
-            "no_response": _status_count(db, LeadStatus.NO_RESPONSE, eid),
-            "won": _status_count(db, LeadStatus.WON, eid),
-            "lost": _status_count(db, LeadStatus.LOST, eid),
-            "overdue": emp_overdue,
-        })
+            "assigned": sum(per_emp_status[emp.id].values()),
+            "new": per_emp_status[emp.id][LeadStatus.NEW.value],
+            "contacted": per_emp_status[emp.id][LeadStatus.CONTACTED.value],
+            "follow_up": per_emp_status[emp.id][LeadStatus.FOLLOW_UP.value],
+            "pending": per_emp_status[emp.id][LeadStatus.PENDING.value],
+            "no_response": per_emp_status[emp.id][LeadStatus.NO_RESPONSE.value],
+            "won": per_emp_status[emp.id][LeadStatus.WON.value],
+            "lost": per_emp_status[emp.id][LeadStatus.LOST.value],
+            "overdue": per_emp_overdue[emp.id],
+        }
+        for emp in employees
+    ]
 
     return {
         "stats": {
             "total_leads": total,
             "overdue_follow_ups": overdue_total,
             "today_follow_ups": today_total,
-            **status_counts,
+            **{k.lower(): v for k, v in status_counts.items()},
         },
         "employee_performance": emp_perf,
     }

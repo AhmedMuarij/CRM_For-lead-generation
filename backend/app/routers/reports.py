@@ -56,31 +56,50 @@ def employee_performance(
     _: User = Depends(require_manager),
 ):
     employees = db.query(User).filter(User.role == UserRole.EMPLOYEE).all()
+    employee_ids = [e.id for e in employees]
+
+    # One GROUP BY per metric instead of 4 queries per employee — the
+    # per-employee loop this replaced made 4N round trips, which is slow even
+    # locally and can exceed a serverless function's time limit against a
+    # real network-hop database.
+    lead_stats = {eid: {"total": 0, "won": 0, "lost": 0} for eid in employee_ids}
+    if employee_ids:
+        lead_q = db.query(Lead.assigned_employee_id, Lead.status, func.count(Lead.id)).filter(
+            Lead.assigned_employee_id.in_(employee_ids)
+        )
+        if from_date:
+            lead_q = lead_q.filter(Lead.created_at >= datetime.combine(from_date, datetime.min.time()))
+        if to_date:
+            lead_q = lead_q.filter(Lead.created_at <= datetime.combine(to_date, datetime.max.time()))
+        for eid, status, count in lead_q.group_by(Lead.assigned_employee_id, Lead.status).all():
+            lead_stats[eid]["total"] += count
+            if status == LeadStatus.WON:
+                lead_stats[eid]["won"] = count
+            elif status == LeadStatus.LOST:
+                lead_stats[eid]["lost"] = count
+
+    call_counts = {eid: 0 for eid in employee_ids}
+    if employee_ids:
+        call_q = db.query(Call.employee_id, func.count(Call.id)).filter(
+            Call.employee_id.in_(employee_ids)
+        )
+        if from_date:
+            call_q = call_q.filter(Call.call_datetime >= datetime.combine(from_date, datetime.min.time()))
+        if to_date:
+            call_q = call_q.filter(Call.call_datetime <= datetime.combine(to_date, datetime.max.time()))
+        for eid, count in call_q.group_by(Call.employee_id).all():
+            call_counts[eid] = count
+
     result = []
     for emp in employees:
-        lead_query = db.query(Lead).filter(Lead.assigned_employee_id == emp.id)
-        if from_date:
-            lead_query = lead_query.filter(Lead.created_at >= datetime.combine(from_date, datetime.min.time()))
-        if to_date:
-            lead_query = lead_query.filter(Lead.created_at <= datetime.combine(to_date, datetime.max.time()))
-
-        total = lead_query.count()
-        won = lead_query.filter(Lead.status == LeadStatus.WON).count()
-        lost = lead_query.filter(Lead.status == LeadStatus.LOST).count()
-
-        call_query = db.query(func.count(Call.id)).filter(Call.employee_id == emp.id)
-        if from_date:
-            call_query = call_query.filter(Call.call_datetime >= datetime.combine(from_date, datetime.min.time()))
-        if to_date:
-            call_query = call_query.filter(Call.call_datetime <= datetime.combine(to_date, datetime.max.time()))
-        total_calls = call_query.scalar() or 0
-
+        stats = lead_stats[emp.id]
+        total, won, lost = stats["total"], stats["won"], stats["lost"]
         result.append({
             "employee_id": emp.id,
             "employee_name": emp.name,
             "active": emp.active,
             "assigned_leads": total,
-            "total_calls": total_calls,
+            "total_calls": call_counts[emp.id],
             "won": won,
             "lost": lost,
             "conversion_rate": round((won / total * 100), 2) if total > 0 else 0.0,

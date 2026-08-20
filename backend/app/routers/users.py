@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
@@ -29,7 +30,35 @@ def list_users(
     _: User = Depends(require_manager),
 ):
     users = db.query(User).order_by(User.name).all()
-    return [_user_with_stats(u, db) for u in users]
+    user_ids = [u.id for u in users]
+
+    # 2 GROUP BY queries instead of 2 per user — the per-user loop this
+    # replaced made 2N round trips against the database.
+    total_counts = {uid: 0 for uid in user_ids}
+    active_counts = {uid: 0 for uid in user_ids}
+    if user_ids:
+        for uid, count in (
+            db.query(Lead.assigned_employee_id, func.count(Lead.id))
+            .filter(Lead.assigned_employee_id.in_(user_ids))
+            .group_by(Lead.assigned_employee_id)
+            .all()
+        ):
+            total_counts[uid] = count
+        for uid, count in (
+            db.query(Lead.assigned_employee_id, func.count(Lead.id))
+            .filter(Lead.assigned_employee_id.in_(user_ids), Lead.status.notin_(["WON", "LOST"]))
+            .group_by(Lead.assigned_employee_id)
+            .all()
+        ):
+            active_counts[uid] = count
+
+    result = []
+    for u in users:
+        out = UserOutWithStats.model_validate(u)
+        out.assigned_leads_count = total_counts[u.id]
+        out.active_leads_count = active_counts[u.id]
+        result.append(out)
+    return result
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
