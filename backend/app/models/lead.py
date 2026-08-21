@@ -72,6 +72,7 @@ class Lead(Base):
     calls = relationship("Call", back_populates="lead", cascade="all, delete-orphan", order_by="Call.call_datetime")
     follow_ups = relationship("FollowUp", back_populates="lead", cascade="all, delete-orphan", order_by="FollowUp.scheduled_at")
     notes = relationship("LeadNote", back_populates="lead", cascade="all, delete-orphan", order_by="LeadNote.created_at")
+    audit_logs = relationship("AuditLog", back_populates="lead", cascade="all, delete-orphan", order_by="AuditLog.created_at")
 
     __table_args__ = (
         Index("ix_leads_status_employee", "status", "assigned_employee_id"),

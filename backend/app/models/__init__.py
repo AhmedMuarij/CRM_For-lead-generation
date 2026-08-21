@@ -5,6 +5,7 @@ from app.models.call import Call, CallOutcome
 from app.models.follow_up import FollowUp, FollowUpStatus
 from app.models.note import LeadNote
 from app.models.import_log import ImportLog
+from app.models.audit_log import AuditLog
 
 __all__ = [
     "User", "UserRole",
@@ -13,4 +14,5 @@ __all__ = [
     "FollowUp", "FollowUpStatus",
     "LeadNote",
     "ImportLog",
+    "AuditLog",
 ]

@@ -7,9 +7,12 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.lead import Lead, LeadStatus, ACTIVE_STATUSES
 from app.models.follow_up import FollowUp, FollowUpStatus
+from app.models.audit_log import AuditLog
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadOut, LeadListOut, LeadAssign, PaginatedLeads
+from app.schemas.audit_log import AuditLogOut
 from app.auth.dependencies import get_current_user, require_manager
 from app.services.phone_utils import normalize_phone
+from app.services import audit
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
@@ -147,8 +150,10 @@ def update_lead(
             detail="Please schedule a follow-up date and time first before setting status to Follow-Up",
         )
     update_data = payload.model_dump(exclude_unset=True)
+    changes = {key: (getattr(lead, key), value) for key, value in update_data.items()}
     for key, value in update_data.items():
         setattr(lead, key, value)
+    audit.record_field_changes(db, lead_id=lead.id, user=current_user, changes=changes)
     db.commit()
     db.refresh(lead)
     return lead
@@ -159,7 +164,7 @@ def assign_lead(
     lead_id: int,
     payload: LeadAssign,
     db: Session = Depends(get_db),
-    _: User = Depends(require_manager),
+    current_user: User = Depends(require_manager),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
@@ -167,7 +172,21 @@ def assign_lead(
     employee = db.query(User).filter(User.id == payload.employee_id, User.active == True).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found or inactive")
+    previous_employee = lead.assigned_employee
     lead.assigned_employee_id = payload.employee_id
+    audit.record(
+        db,
+        lead_id=lead.id,
+        user=current_user,
+        action="ASSIGN",
+        field_name="assigned_employee_id",
+        old_value=previous_employee.id if previous_employee else None,
+        new_value=employee.id,
+        description=(
+            f"Reassigned from {previous_employee.name} to {employee.name}"
+            if previous_employee else f"Assigned to {employee.name}"
+        ),
+    )
     db.commit()
     db.refresh(lead)
     return lead
@@ -177,14 +196,52 @@ def assign_lead(
 def reopen_lead(
     lead_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_manager),
+    current_user: User = Depends(require_manager),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     if lead.status not in [LeadStatus.WON, LeadStatus.LOST]:
         raise HTTPException(status_code=400, detail="Only closed leads can be reopened")
+    old_status = lead.status
     lead.status = LeadStatus.CONTACTED
+    audit.record(
+        db,
+        lead_id=lead.id,
+        user=current_user,
+        action="STATUS_CHANGE",
+        field_name="status",
+        old_value=old_status,
+        new_value=LeadStatus.CONTACTED,
+        description=f"Lead reopened ({old_status.value} → {LeadStatus.CONTACTED.value})",
+    )
     db.commit()
     db.refresh(lead)
     return lead
+
+
+@router.get("/{lead_id}/audit-logs", response_model=List[AuditLogOut])
+def get_lead_audit_logs(
+    lead_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    if current_user.role == UserRole.EMPLOYEE and lead.assigned_employee_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    logs = (
+        db.query(AuditLog)
+        .options(joinedload(AuditLog.user))
+        .filter(AuditLog.lead_id == lead_id)
+        .order_by(AuditLog.created_at.desc())
+        .all()
+    )
+    result = []
+    for log in logs:
+        out = AuditLogOut.model_validate(log)
+        out.user_name = log.user.name if log.user else "System"
+        result.append(out)
+    return result

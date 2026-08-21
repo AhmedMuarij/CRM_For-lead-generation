@@ -143,6 +143,19 @@ export interface LeadNote {
     created_at: string;
 }
 
+export interface AuditLog {
+    id: number;
+    lead_id: number;
+    user_id: number | null;
+    user_name?: string;
+    action: string;
+    field_name?: string;
+    old_value?: string;
+    new_value?: string;
+    description?: string;
+    created_at: string;
+}
+
 // ─── Dashboard Types ──────────────────────────────────────────
 
 export interface EmployeeDashboard {

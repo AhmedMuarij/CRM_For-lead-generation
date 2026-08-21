@@ -1,15 +1,15 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { AppShell } from "@/components/layout";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
 import api from "@/lib/api";
-import { Lead, CallLog, LeadNote, User, LeadStatus, CallOutcome } from "@/types";
+import { Lead, CallLog, LeadNote, User, LeadStatus, CallOutcome, AuditLog } from "@/types";
 import { format } from "date-fns";
 import { useParams } from "next/navigation";
 import toast from "react-hot-toast";
-import { Phone, Copy, PhoneCall, Clock, StickyNote, AlertTriangle, CheckCircle2, LucideIcon } from "lucide-react";
+import { Phone, Copy, PhoneCall, Clock, StickyNote, AlertTriangle, CheckCircle2, History, LucideIcon } from "lucide-react";
 import clsx from "clsx";
 
 const STATUS_OPTIONS: LeadStatus[] = ["NEW", "CONTACTED", "FOLLOW_UP", "PENDING", "NO_RESPONSE", "WON", "LOST"];
@@ -33,6 +33,7 @@ export default function LeadDetailPage() {
     const [lead, setLead] = useState<Lead | null>(null);
     const [calls, setCalls] = useState<CallLog[]>([]);
     const [notes, setNotes] = useState<LeadNote[]>([]);
+    const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
     const [employees, setEmployees] = useState<User[]>([]);
 
     // Forms
@@ -54,10 +55,50 @@ export default function LeadDetailPage() {
         api.get(`/api/leads/${id}/calls`).then(r => setCalls(r.data));
         api.get(`/api/follow-ups`, { params: { lead_id: id } }).catch(() => { });
         api.get(`/api/leads/${id}/notes`).then(r => setNotes(r.data));
+        api.get(`/api/leads/${id}/audit-logs`).then(r => setAuditLogs(r.data)).catch(() => { });
     }, [id]);
 
     useEffect(() => { reload(); }, [reload]);
     useEffect(() => { if (isManager) api.get("/api/users").then(r => setEmployees(r.data.filter((u: User) => u.role === "EMPLOYEE" && u.active))); }, [isManager]);
+
+    // Combined timeline: status/assignment changes (audit log) + calls + notes,
+    // all merged into one chronological feed.
+    type ActivityEvent = {
+        key: string;
+        timestamp: string;
+        actor: string;
+        icon: LucideIcon;
+        summary: string;
+        detail?: string;
+    };
+    const activity = useMemo<ActivityEvent[]>(() => {
+        const events: ActivityEvent[] = [
+            ...auditLogs.map(a => ({
+                key: `audit-${a.id}`,
+                timestamp: a.created_at,
+                actor: a.user_name || "System",
+                icon: History,
+                summary: a.description || a.action.replace(/_/g, " ").toLowerCase(),
+            })),
+            ...calls.map(c => ({
+                key: `call-${c.id}`,
+                timestamp: c.call_datetime,
+                actor: c.employee_name || "—",
+                icon: PhoneCall,
+                summary: `Logged call #${c.attempt_number} · ${c.outcome.replace(/_/g, " ")}`,
+                detail: c.notes,
+            })),
+            ...notes.map(n => ({
+                key: `note-${n.id}`,
+                timestamp: n.created_at,
+                actor: n.employee_name || "—",
+                icon: StickyNote,
+                summary: "Added a note",
+                detail: n.content,
+            })),
+        ];
+        return events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }, [auditLogs, calls, notes]);
 
     function errorMessage(err: unknown, fallback: string) {
         return (axios.isAxiosError(err) ? err.response?.data?.detail : undefined) || fallback;
@@ -203,6 +244,32 @@ export default function LeadDetailPage() {
                                     className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                                 <button onClick={submitNote} className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700">Add</button>
                             </div>
+                        </Section>
+
+                        {/* Activity History — status/assignment changes, calls, and notes merged into one timeline */}
+                        <Section title="Activity History" icon={History}>
+                            {activity.length === 0
+                                ? <p className="text-sm text-slate-400">No activity recorded yet.</p>
+                                : <div className="space-y-3">
+                                    {activity.map(ev => {
+                                        const Icon = ev.icon;
+                                        return (
+                                            <div key={ev.key} className="flex gap-3 text-sm">
+                                                <div className="w-6 h-6 mt-0.5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                                                    <Icon className="w-3.5 h-3.5 text-slate-400" />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <p className="text-slate-700">
+                                                        <span className="font-semibold">{ev.actor}</span>
+                                                        {" "}{ev.summary}
+                                                    </p>
+                                                    {ev.detail && <p className="text-xs text-slate-500 italic mt-0.5">&quot;{ev.detail}&quot;</p>}
+                                                    <p className="text-xs text-slate-400">{format(new Date(ev.timestamp), "MMM d, yyyy · h:mm a")}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>}
                         </Section>
                     </div>
 
