@@ -154,7 +154,7 @@ export default function LeadDetailPage() {
     const overdue = lead.next_follow_up_at && lead.status === "FOLLOW_UP" && new Date(lead.next_follow_up_at) < new Date();
 
     return (
-        <AppShell>
+        <AppShell title={lead.customer_name}>
             <div className="p-6 space-y-5 max-w-5xl">
                 {/* Header */}
                 <div className="flex items-start justify-between">
@@ -181,10 +181,10 @@ export default function LeadDetailPage() {
                                     </div>
                                     <div className="flex gap-2">
                                         <button onClick={() => { navigator.clipboard.writeText(lead.phone); toast.success("Copied!"); }}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
+                                            className="flex items-center gap-1.5 px-3 min-h-11 text-xs bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
                                             <Copy className="w-3 h-3" /> Copy
                                         </button>
-                                        <a href={`tel:${lead.phone}`} className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
+                                        <a href={`tel:${lead.phone}`} className="flex items-center gap-1.5 px-3 min-h-11 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">
                                             <PhoneCall className="w-3 h-3" /> Call
                                         </a>
                                     </div>
@@ -250,12 +250,14 @@ export default function LeadDetailPage() {
                         <Section title="Activity History" icon={History}>
                             {activity.length === 0
                                 ? <p className="text-sm text-slate-400">No activity recorded yet.</p>
-                                : <div className="space-y-3">
-                                    {activity.map(ev => {
+                                : <div>
+                                    {activity.map((ev, idx) => {
                                         const Icon = ev.icon;
+                                        const isLast = idx === activity.length - 1;
                                         return (
-                                            <div key={ev.key} className="flex gap-3 text-sm">
-                                                <div className="w-6 h-6 mt-0.5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
+                                            <div key={ev.key} className={clsx("relative flex gap-3 text-sm", !isLast && "pb-4")}>
+                                                {!isLast && <span className="absolute left-3 top-6 bottom-0 w-px bg-slate-200" />}
+                                                <div className="relative w-6 h-6 mt-0.5 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
                                                     <Icon className="w-3.5 h-3.5 text-slate-400" />
                                                 </div>
                                                 <div className="flex-1">
@@ -264,7 +266,7 @@ export default function LeadDetailPage() {
                                                         {" "}{ev.summary}
                                                     </p>
                                                     {ev.detail && <p className="text-xs text-slate-500 italic mt-0.5">&quot;{ev.detail}&quot;</p>}
-                                                    <p className="text-xs text-slate-400">{format(new Date(ev.timestamp), "MMM d, yyyy · h:mm a")}</p>
+                                                    <p className="text-xs text-slate-400 mt-0.5">{format(new Date(ev.timestamp), "MMM d, yyyy · h:mm a")}</p>
                                                 </div>
                                             </div>
                                         );
@@ -293,7 +295,7 @@ export default function LeadDetailPage() {
                         </Section>
 
                         {/* Change Status */}
-                        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
                             <h3 className="font-semibold text-slate-700 text-sm">Change Status</h3>
                             <select value={newStatus} onChange={e => setNewStatus(e.target.value as LeadStatus)}
                                 className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm">
@@ -303,7 +305,7 @@ export default function LeadDetailPage() {
                         </div>
 
                         {/* Log Call */}
-                        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
                             <h3 className="font-semibold text-slate-700 text-sm">Log Call</h3>
                             {!logCallOpen
                                 ? <button onClick={() => setLogCallOpen(true)} className="w-full py-2 text-sm bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 flex items-center justify-center gap-2"><PhoneCall className="w-4 h-4" /> Log a Call</button>
@@ -321,7 +323,7 @@ export default function LeadDetailPage() {
                         </div>
 
                         {/* Schedule Follow-Up */}
-                        <div className="bg-white rounded-2xl border border-amber-200 p-4 space-y-3">
+                        <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-4 space-y-3">
                             <h3 className="font-semibold text-amber-700 text-sm">Schedule Follow-Up</h3>
                             {!fuOpen
                                 ? <button onClick={() => setFuOpen(true)} className="w-full py-2 text-sm bg-amber-500 text-white rounded-xl hover:bg-amber-600 flex items-center justify-center gap-2"><Clock className="w-4 h-4" /> Schedule</button>
@@ -338,7 +340,7 @@ export default function LeadDetailPage() {
 
                         {/* Assign (Manager only) */}
                         {isManager && (
-                            <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
                                 <h3 className="font-semibold text-slate-700 text-sm">Assign / Reassign</h3>
                                 <select value={assignTo} onChange={e => setAssignTo(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm">
                                     <option value="">Select employee…</option>

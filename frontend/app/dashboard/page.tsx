@@ -12,13 +12,36 @@ import {
 } from "@/types";
 import { formatDistanceToNow, format } from "date-fns";
 import Link from "next/link";
+import clsx from "clsx";
 import {
     AlertTriangle,
     Clock,
     Plus,
     Users,
-    LayoutDashboard,
+    ClipboardList,
+    CheckCircle2,
+    MessageCircle,
+    Ban,
 } from "lucide-react";
+
+function greeting() {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 17) return "Good afternoon";
+    return "Good evening";
+}
+
+function GreetingHeader({ subhead }: { subhead: string }) {
+    const { user } = useAuth();
+    const today = format(new Date(), "EEEE, MMMM d");
+    return (
+        <div>
+            <p className="text-xs font-bold text-emerald-700 tracking-wide uppercase mb-1">{today}</p>
+            <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">{greeting()}, {user?.name?.split(" ")[0] ?? ""}</h1>
+            <p className="text-sm text-slate-500 mt-1">{subhead}</p>
+        </div>
+    );
+}
 
 /* =========================================================
    Shared row components
@@ -241,18 +264,14 @@ export default function DashboardPage() {
         return (
             <AppShell>
                 <div className="p-6 space-y-6">
-                    <div className="flex items-center gap-3">
-                        <LayoutDashboard className="w-6 h-6 text-slate-400" />
-                        <h1 className="text-2xl font-bold text-slate-800">
-                            Manager Dashboard
-                        </h1>
-                    </div>
+                    <GreetingHeader subhead="Here's how the team is tracking today." />
 
                     {/* Summary cards */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <StatCard
                             label="Total Leads"
                             value={safeNumber(stats.total_leads)}
+                            icon={ClipboardList}
                             color="blue"
                         />
 
@@ -261,6 +280,7 @@ export default function DashboardPage() {
                             value={safeNumber(
                                 stats.overdue_follow_ups
                             )}
+                            icon={AlertTriangle}
                             color="red"
                             urgent={
                                 safeNumber(stats.overdue_follow_ups) > 0
@@ -272,12 +292,14 @@ export default function DashboardPage() {
                             value={safeNumber(
                                 stats.today_follow_ups
                             )}
+                            icon={Clock}
                             color="amber"
                         />
 
                         <StatCard
                             label="Won"
                             value={safeNumber(stats.won)}
+                            icon={CheckCircle2}
                             color="emerald"
                         />
                     </div>
@@ -287,24 +309,28 @@ export default function DashboardPage() {
                         <StatCard
                             label="New"
                             value={safeNumber(stats.new)}
+                            icon={Plus}
                             color="blue"
                         />
 
                         <StatCard
                             label="Contacted"
                             value={safeNumber(stats.contacted)}
+                            icon={MessageCircle}
                             color="indigo"
                         />
 
                         <StatCard
                             label="Follow-Up"
                             value={safeNumber(stats.follow_up)}
+                            icon={Clock}
                             color="amber"
                         />
 
                         <StatCard
                             label="Lost"
                             value={safeNumber(stats.lost)}
+                            icon={Ban}
                             color="slate"
                         />
                     </div>
@@ -318,7 +344,7 @@ export default function DashboardPage() {
                             </h2>
                         </div>
 
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto hidden md:block">
                             <table className="w-full text-sm">
                                 <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                                     <tr>
@@ -446,6 +472,40 @@ export default function DashboardPage() {
                                 </tbody>
                             </table>
                         </div>
+
+                        {/* Mobile: stacked cards instead of a squeezed table */}
+                        <div className="md:hidden divide-y divide-slate-100">
+                            {performance.length === 0 ? (
+                                <p className="px-4 py-8 text-center text-sm text-slate-400">No employee performance data available.</p>
+                            ) : (
+                                performance.map((employee) => {
+                                    const overdue = safeNumber(employee.overdue);
+                                    return (
+                                        <div key={employee.employee_id} className="p-4">
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                                                    {employee.employee_name?.charAt(0) ?? "?"}
+                                                </div>
+                                                <Link href={`/employees/${employee.employee_id}`} className="font-bold text-sm text-slate-800 hover:text-emerald-600 flex-1">
+                                                    {employee.employee_name}
+                                                </Link>
+                                                <span className="text-xs font-semibold text-slate-400">{safeNumber(employee.assigned)} assigned</span>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-blue-50 text-blue-700">New {safeNumber(employee.new)}</span>
+                                                <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-indigo-50 text-indigo-700">Contacted {safeNumber(employee.contacted)}</span>
+                                                <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-50 text-amber-700">Follow-Up {safeNumber(employee.follow_up)}</span>
+                                                <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700">Won {safeNumber(employee.won)}</span>
+                                                <span className={clsx(
+                                                    "px-2 py-0.5 rounded-lg text-[11px] font-bold",
+                                                    overdue > 0 ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-400"
+                                                )}>Overdue {overdue}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
                     </div>
                 </div>
             </AppShell>
@@ -466,24 +526,21 @@ export default function DashboardPage() {
     return (
         <AppShell>
             <div className="p-6 space-y-6">
-                <div className="flex items-center gap-3">
-                    <LayoutDashboard className="w-6 h-6 text-slate-400" />
-                    <h1 className="text-2xl font-bold text-slate-800">
-                        My Dashboard
-                    </h1>
-                </div>
+                <GreetingHeader subhead="Here's what needs your attention today." />
 
                 {/* Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <StatCard
                         label="My Leads"
                         value={safeNumber(stats.total)}
+                        icon={ClipboardList}
                         color="blue"
                     />
 
                     <StatCard
                         label="Overdue"
                         value={safeNumber(stats.overdue)}
+                        icon={AlertTriangle}
                         color="red"
                         urgent={safeNumber(stats.overdue) > 0}
                     />
@@ -493,12 +550,14 @@ export default function DashboardPage() {
                         value={safeNumber(
                             stats.today_follow_ups
                         )}
+                        icon={Clock}
                         color="amber"
                     />
 
                     <StatCard
                         label="New Leads"
                         value={safeNumber(stats.new)}
+                        icon={Plus}
                         color="indigo"
                     />
                 </div>
@@ -507,24 +566,28 @@ export default function DashboardPage() {
                     <StatCard
                         label="Pending"
                         value={safeNumber(stats.pending)}
+                        icon={Clock}
                         color="orange"
                     />
 
                     <StatCard
                         label="Contacted"
                         value={safeNumber(stats.contacted)}
+                        icon={MessageCircle}
                         color="indigo"
                     />
 
                     <StatCard
                         label="Won"
                         value={safeNumber(stats.won)}
+                        icon={CheckCircle2}
                         color="emerald"
                     />
 
                     <StatCard
                         label="Lost"
                         value={safeNumber(stats.lost)}
+                        icon={Ban}
                         color="slate"
                     />
                 </div>

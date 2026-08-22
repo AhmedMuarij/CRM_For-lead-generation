@@ -11,6 +11,14 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        // Deep, slightly-cool navy used for the sidebar / mobile chrome —
+        // distinct from slate so the app's structural chrome doesn't get
+        // confused with ordinary neutral surfaces.
+        navy: {
+          700: "#2e3757",
+          800: "#232b47",
+          900: "#1a2036",
+        },
       },
     },
   },

@@ -7,7 +7,7 @@ import api from "@/lib/api";
 import { PaginatedLeads, LeadListItem, User, LeadStatus } from "@/types";
 import { format } from "date-fns";
 import Link from "next/link";
-import { Search, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, AlertTriangle, SlidersHorizontal, Clock } from "lucide-react";
 import clsx from "clsx";
 
 const STATUSES: LeadStatus[] = ["NEW", "CONTACTED", "FOLLOW_UP", "PENDING", "NO_RESPONSE", "WON", "LOST"];
@@ -21,6 +21,7 @@ export default function LeadsPage() {
     const [employeeId, setEmployeeId] = useState("");
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(false);
+    const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -45,9 +46,12 @@ export default function LeadsPage() {
     return (
         <AppShell>
             <div className="p-6 space-y-5">
-                <h1 className="text-2xl font-bold text-slate-800">{isManager ? "All Leads" : "My Leads"}</h1>
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-800">{isManager ? "All Leads" : "My Leads"}</h1>
+                    {data && <p className="text-sm text-slate-500 mt-1">{data.total} leads{isManager ? " across the team" : ""}</p>}
+                </div>
 
-                {/* Filters */}
+                {/* Filters — full row on desktop, search + a "Filters" toggle on mobile */}
                 <div className="flex flex-wrap gap-3">
                     <div className="relative flex-1 min-w-[200px]">
                         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
@@ -58,10 +62,16 @@ export default function LeadsPage() {
                             className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         />
                     </div>
+                    <button
+                        onClick={() => setMobileFiltersOpen(o => !o)}
+                        className="md:hidden flex items-center gap-2 px-3 min-h-11 border border-slate-300 rounded-xl text-sm font-semibold text-slate-600"
+                    >
+                        <SlidersHorizontal className="w-4 h-4" /> Filters
+                    </button>
                     <select
                         value={status}
                         onChange={e => { setStatus(e.target.value); setPage(1); }}
-                        className="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="hidden md:block px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     >
                         <option value="">All Statuses</option>
                         {STATUSES.map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
@@ -70,7 +80,7 @@ export default function LeadsPage() {
                         <select
                             value={employeeId}
                             onChange={e => { setEmployeeId(e.target.value); setPage(1); }}
-                            className="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            className="hidden md:block px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         >
                             <option value="">All Employees</option>
                             {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -78,9 +88,33 @@ export default function LeadsPage() {
                     )}
                 </div>
 
-                {/* Table */}
+                {/* Mobile filters panel */}
+                {mobileFiltersOpen && (
+                    <div className="md:hidden flex flex-col gap-3 p-4 bg-white border border-slate-200 rounded-xl">
+                        <select
+                            value={status}
+                            onChange={e => { setStatus(e.target.value); setPage(1); }}
+                            className="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                            <option value="">All Statuses</option>
+                            {STATUSES.map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+                        </select>
+                        {isManager && (
+                            <select
+                                value={employeeId}
+                                onChange={e => { setEmployeeId(e.target.value); setPage(1); }}
+                                className="px-3 py-2 border border-slate-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            >
+                                <option value="">All Employees</option>
+                                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                            </select>
+                        )}
+                    </div>
+                )}
+
+                {/* Table (desktop) / cards (mobile) */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto hidden md:block">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                                 <tr>
@@ -133,15 +167,50 @@ export default function LeadsPage() {
                         </table>
                     </div>
 
+                    {/* Mobile card list */}
+                    <div className="md:hidden divide-y divide-slate-100">
+                        {loading && <p className="px-4 py-8 text-center text-sm text-slate-400">Loading…</p>}
+                        {!loading && data?.items.length === 0 && (
+                            <p className="px-4 py-8 text-center text-sm text-slate-400">No leads found</p>
+                        )}
+                        {!loading && data?.items.map(lead => (
+                            <Link key={lead.id} href={`/leads/${lead.id}`} className="block p-4">
+                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                    <span className="font-semibold text-sm text-slate-800 flex items-center gap-1.5 truncate">
+                                        {isOverdue(lead) && <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />}
+                                        {lead.customer_name}
+                                    </span>
+                                    <StatusBadge status={lead.status} />
+                                </div>
+                                <p className="text-xs text-slate-500 mb-2">
+                                    {lead.phone} · {lead.city || "—"} · {lead.vehicle_interest || "—"}
+                                    {isManager && lead.assigned_employee_name && <> · {lead.assigned_employee_name}</>}
+                                </p>
+                                <div className="flex items-center justify-between">
+                                    {lead.next_follow_up_at ? (
+                                        <span className={clsx(
+                                            "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-lg",
+                                            isOverdue(lead) ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500"
+                                        )}>
+                                            <Clock className="w-3 h-3" />
+                                            {format(new Date(lead.next_follow_up_at), "MMM d, h:mm a")}
+                                        </span>
+                                    ) : <span className="text-[11px] text-slate-400">No follow-up scheduled</span>}
+                                    <span className="text-[11px] text-slate-400">{format(new Date(lead.created_at), "MMM d")}</span>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+
                     {/* Pagination */}
                     {data && data.total_pages > 1 && (
                         <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
                             <p className="text-xs text-slate-500">Showing {((page - 1) * 25) + 1}–{Math.min(page * 25, data.total)} of {data.total}</p>
                             <div className="flex gap-2">
-                                <button onClick={() => setPage(p => p - 1)} disabled={page === 1} className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50">
+                                <button onClick={() => setPage(p => p - 1)} disabled={page === 1} className="w-11 h-11 flex items-center justify-center rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50">
                                     <ChevronLeft className="w-4 h-4" />
                                 </button>
-                                <button onClick={() => setPage(p => p + 1)} disabled={page >= data.total_pages} className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50">
+                                <button onClick={() => setPage(p => p + 1)} disabled={page >= data.total_pages} className="w-11 h-11 flex items-center justify-center rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50">
                                     <ChevronRight className="w-4 h-4" />
                                 </button>
                             </div>
