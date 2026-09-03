@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Text, func
+from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Text, func, Index
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -27,3 +27,17 @@ class FollowUp(Base):
     # Relationships
     lead = relationship("Lead", back_populates="follow_ups")
     employee = relationship("User", back_populates="follow_ups")
+
+    # Fix #8: composite indexes for dashboard queries that filter on all three
+    # columns simultaneously — prevents Postgres from using three single-column
+    # indexes and scanning far more rows than necessary.
+    __table_args__ = (
+        Index(
+            "ix_follow_ups_employee_status_scheduled",
+            "employee_id", "status", "scheduled_at",
+        ),
+        Index(
+            "ix_follow_ups_status_scheduled",   # manager-wide (no employee filter)
+            "status", "scheduled_at",
+        ),
+    )

@@ -1,6 +1,6 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from app.database import get_db
 from app.models.user import User, UserRole
@@ -58,7 +58,14 @@ def get_calls(
     if current_user.role == UserRole.EMPLOYEE and lead.assigned_employee_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    calls = db.query(Call).filter(Call.lead_id == lead_id).order_by(Call.call_datetime.desc()).all()
+    # Fix #4: joinedload eliminates the N+1 lazy SELECT per call on c.employee.
+    calls = (
+        db.query(Call)
+        .options(joinedload(Call.employee))
+        .filter(Call.lead_id == lead_id)
+        .order_by(Call.call_datetime.desc())
+        .all()
+    )
     result = []
     for c in calls:
         out = CallOut.model_validate(c)

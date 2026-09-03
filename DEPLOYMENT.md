@@ -17,13 +17,24 @@ repo root
 
 Any Postgres works; Neon has a free tier that needs no card.
 
+### Option A — Neon
 1. Sign up at **neon.tech** → **New Project**
 2. Copy the **pooled** connection string — it has `-pooler` in the host.
 
-> **Use the pooled endpoint.** A serverless function opens a connection per
-> invocation, so a direct connection quickly exhausts Postgres' limit.
-> `app/database.py` disables SQLAlchemy's own pool when running on Vercel
-> and leaves pooling to the provider.
+### Option B — Supabase (Fix #10)
+1. Create a project → **Project Settings → Database → Connection pooling**
+2. Select **Session mode** and copy that URL (hostname contains `.pooler.supabase.com`, port **6543**).
+   ```
+   postgresql://postgres.[ref]:[password]@aws-0-[region].pooler.supabase.com:6543/postgres?sslmode=require
+   ```
+   ⚠️ **Do NOT use the direct connection string** (port 5432, host `db.xxx.supabase.co`).
+   Supabase limits direct connections to ~60. Under serverless load this causes:
+   `FATAL: remaining connection slots are reserved`.
+
+> **Why pooled?** `app/database.py` uses `NullPool` on Vercel — SQLAlchemy opens
+> one raw TCP connection per invocation and immediately closes it. Pooling must
+> happen at the provider level (Supavisor / PgBouncer / Neon pooler).
+
 
 ## 2. Apply migrations
 

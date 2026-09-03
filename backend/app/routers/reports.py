@@ -20,20 +20,30 @@ def summary_report(
     db: Session = Depends(get_db),
     _: User = Depends(require_manager),
 ):
-    query = db.query(Lead)
+    # Fix #1: replaced 10 sequential COUNT queries (1 total + 1 won + 1 lost +
+    # 7-status loop) with a single GROUP BY query for all status counts.
+    base_filters = []
     if from_date:
-        query = query.filter(Lead.created_at >= datetime.combine(from_date, datetime.min.time()))
+        base_filters.append(Lead.created_at >= datetime.combine(from_date, datetime.min.time()))
     if to_date:
-        query = query.filter(Lead.created_at <= datetime.combine(to_date, datetime.max.time()))
+        base_filters.append(Lead.created_at <= datetime.combine(to_date, datetime.max.time()))
 
-    total = query.count()
-    won = query.filter(Lead.status == LeadStatus.WON).count()
-    lost = query.filter(Lead.status == LeadStatus.LOST).count()
+    rows = (
+        db.query(Lead.status, func.count(Lead.id))
+        .filter(*base_filters)
+        .group_by(Lead.status)
+        .all()
+    )
+
+    status_breakdown = {s.value: 0 for s in LeadStatus}
+    total = 0
+    for status, cnt in rows:
+        status_breakdown[status.value] = cnt
+        total += cnt
+
+    won = status_breakdown.get(LeadStatus.WON.value, 0)
+    lost = status_breakdown.get(LeadStatus.LOST.value, 0)
     conversion_rate = round((won / total * 100), 2) if total > 0 else 0.0
-
-    status_breakdown = {}
-    for s in LeadStatus:
-        status_breakdown[s.value] = query.filter(Lead.status == s).count()
 
     return {
         "total_leads": total,

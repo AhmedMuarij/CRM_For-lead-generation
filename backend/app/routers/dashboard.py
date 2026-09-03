@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, case, and_
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.lead import Lead, LeadStatus
@@ -22,19 +22,34 @@ def _status_counts(db: Session, employee_id: int | None = None) -> dict[str, int
     return counts
 
 
-def _bucket_follow_ups(scheduled_ats: list[datetime], now: datetime, today_start: datetime, today_end: datetime):
-    """Bucket a list of scheduled_at values into overdue/today/upcoming counts in
-    Python — cheaper than three separate range-filtered COUNT queries, and the
-    portable way to do it across SQLite (tests) and Postgres (prod)."""
-    overdue = today = upcoming = 0
-    for dt in scheduled_ats:
-        if dt < now:
-            overdue += 1
-        elif today_start <= dt <= today_end:
-            today += 1
-        elif dt > today_end:
-            upcoming += 1
-    return overdue, today, upcoming
+def _follow_up_bucket_counts(
+    db: Session,
+    now: datetime,
+    today_start: datetime,
+    today_end: datetime,
+    employee_id: int | None = None,
+) -> tuple[int, int, int]:
+    """Fix #2: single SQL CASE aggregation instead of loading all rows into Python.
+
+    Returns (overdue, today, upcoming) — all arithmetic done server-side.
+    """
+    base = db.query(
+        func.count(case((FollowUp.scheduled_at < now, 1))),
+        func.count(case((
+            and_(
+                FollowUp.scheduled_at >= today_start,
+                FollowUp.scheduled_at <= today_end,
+            ),
+            1,
+        ))),
+        func.count(case((FollowUp.scheduled_at > today_end, 1))),
+    ).filter(FollowUp.status == FollowUpStatus.SCHEDULED)
+
+    if employee_id is not None:
+        base = base.filter(FollowUp.employee_id == employee_id)
+
+    overdue, today, upcoming = base.one()
+    return int(overdue), int(today), int(upcoming)
 
 
 @router.get("/employee")
@@ -50,18 +65,16 @@ def employee_dashboard(
     counts = _status_counts(db, eid)
     total = sum(counts.values())
 
-    scheduled_ats = [
-        row[0] for row in db.query(FollowUp.scheduled_at).filter(
-            FollowUp.employee_id == eid,
-            FollowUp.status == FollowUpStatus.SCHEDULED,
-        ).all()
-    ]
-    overdue_count, today_count, upcoming_count = _bucket_follow_ups(scheduled_ats, now, today_start, today_end)
+    # Fix #2: one SQL CASE query instead of fetching all scheduled_at rows.
+    overdue_count, today_count, upcoming_count = _follow_up_bucket_counts(
+        db, now, today_start, today_end, employee_id=eid
+    )
 
-    # Priority lists
+    # Fix #3: joinedload(FollowUp.lead) eliminates N+1 lazy SELECT on fu.lead
+    # (was up to 20 extra queries per dashboard load for overdue + today lists).
     overdue_leads = (
         db.query(FollowUp)
-        .join(Lead, Lead.id == FollowUp.lead_id)
+        .options(joinedload(FollowUp.lead))
         .filter(
             FollowUp.employee_id == eid,
             FollowUp.status == FollowUpStatus.SCHEDULED,
@@ -74,7 +87,7 @@ def employee_dashboard(
 
     today_leads = (
         db.query(FollowUp)
-        .join(Lead, Lead.id == FollowUp.lead_id)
+        .options(joinedload(FollowUp.lead))
         .filter(
             FollowUp.employee_id == eid,
             FollowUp.status == FollowUpStatus.SCHEDULED,
@@ -149,11 +162,10 @@ def manager_dashboard(
     status_counts = _status_counts(db)
     total = sum(status_counts.values())
 
-    all_scheduled = [
-        row[0] for row in db.query(FollowUp.scheduled_at)
-        .filter(FollowUp.status == FollowUpStatus.SCHEDULED).all()
-    ]
-    overdue_total, today_total, _ = _bucket_follow_ups(all_scheduled, now, today_start, today_end)
+    # Fix #2: one SQL CASE query instead of fetching all follow-up rows system-wide.
+    overdue_total, today_total, _ = _follow_up_bucket_counts(
+        db, now, today_start, today_end
+    )
 
     # Per-employee performance — 2 queries total instead of 9 per employee.
     employees = db.query(User).filter(User.role == UserRole.EMPLOYEE, User.active == True).all()

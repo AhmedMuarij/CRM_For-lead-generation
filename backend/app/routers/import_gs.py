@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from app.database import get_db
 from app.models.user import User
@@ -117,15 +117,55 @@ def import_from_google_sheets(
         raise HTTPException(status_code=500, detail=f"Google Sheets error: {str(e)}")
 
     rows_found = len(rows)
+
+    # Fix #5: pre-map all rows first so we can collect all incoming IDs/phones
+    # in a single pass, then do TWO bulk DB queries to fetch existing records
+    # instead of up to 2×N individual queries inside the loop.
+    mapped_rows = []
+    for row in rows:
+        mapped = _map_row(row)
+        phone = mapped.get("phone", "").strip()
+        mapped["_norm_phone"] = normalize_phone(phone) if phone else None
+        mapped_rows.append(mapped)
+
+    # Collect all incoming dedup keys
+    incoming_ext_ids = {
+        str(m["external_lead_id"])
+        for m in mapped_rows
+        if m.get("external_lead_id")
+    }
+    incoming_phones = {
+        m["_norm_phone"]
+        for m in mapped_rows
+        if m.get("_norm_phone")
+    }
+
+    # Two bulk queries instead of up to 2×N individual SELECTs
+    existing_ext_ids: set[str] = set()
+    if incoming_ext_ids:
+        existing_ext_ids = {
+            row[0]
+            for row in db.query(Lead.external_lead_id)
+            .filter(Lead.external_lead_id.in_(incoming_ext_ids))
+            .all()
+        }
+
+    existing_phones: set[str] = set()
+    if incoming_phones:
+        existing_phones = {
+            row[0]
+            for row in db.query(Lead.phone_normalized)
+            .filter(Lead.phone_normalized.in_(incoming_phones))
+            .all()
+        }
+
     new_leads = 0
     duplicates = 0
     errors = 0
     error_details = []
 
-    for i, row in enumerate(rows, start=2):  # row 1 is header
+    for i, mapped in enumerate(mapped_rows, start=2):  # row 1 is header
         try:
-            mapped = _map_row(row)
-
             customer_name = mapped.get("customer_name", "").strip()
             phone = mapped.get("phone", "").strip()
             if not customer_name or not phone:
@@ -134,19 +174,15 @@ def import_from_google_sheets(
                 continue
 
             ext_id = mapped.get("external_lead_id")
-            norm_phone = normalize_phone(phone)
+            norm_phone = mapped["_norm_phone"]
 
-            # Deduplication
-            if ext_id:
-                existing = db.query(Lead).filter(Lead.external_lead_id == str(ext_id)).first()
-                if existing:
-                    duplicates += 1
-                    continue
-            if norm_phone:
-                existing = db.query(Lead).filter(Lead.phone_normalized == norm_phone).first()
-                if existing:
-                    duplicates += 1
-                    continue
+            # Deduplication — O(1) set lookups, no DB round-trips
+            if ext_id and str(ext_id) in existing_ext_ids:
+                duplicates += 1
+                continue
+            if norm_phone and norm_phone in existing_phones:
+                duplicates += 1
+                continue
 
             # Parse source timestamp if present
             source_created_at = None
@@ -181,6 +217,13 @@ def import_from_google_sheets(
             db.add(lead)
             new_leads += 1
 
+            # Keep in-memory sets current so duplicates within the same batch
+            # are also caught without an extra DB hit.
+            if ext_id:
+                existing_ext_ids.add(str(ext_id))
+            if norm_phone:
+                existing_phones.add(norm_phone)
+
         except Exception as e:
             errors += 1
             error_details.append({"row": i, "error": str(e)})
@@ -213,7 +256,15 @@ def import_history(
     db: Session = Depends(get_db),
     _: User = Depends(require_manager),
 ):
-    logs = db.query(ImportLog).order_by(ImportLog.imported_at.desc()).limit(20).all()
+    # Fix #7: joinedload eliminates the N+1 lazy SELECT per log row on
+    # imported_by_user (was one SELECT per row, up to 20 per page load).
+    logs = (
+        db.query(ImportLog)
+        .options(joinedload(ImportLog.imported_by_user))
+        .order_by(ImportLog.imported_at.desc())
+        .limit(20)
+        .all()
+    )
     return [
         {
             "id": log.id,

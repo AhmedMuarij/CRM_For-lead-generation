@@ -1,7 +1,7 @@
 from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, func, select
 from typing import Optional, List
 from app.database import get_db
 from app.models.user import User, UserRole
@@ -82,7 +82,10 @@ def list_leads(
             )
         )
 
-    total = query.count()
+    # Fix #6: lightweight scalar count on just the id column — avoids the ORM
+    # wrapping the full SELECT (all columns) in a subquery to count it.
+    count_subq = query.with_entities(Lead.id).subquery()
+    total = db.execute(select(func.count()).select_from(count_subq)).scalar_one()
     leads = query.order_by(Lead.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
     import math
     return PaginatedLeads(

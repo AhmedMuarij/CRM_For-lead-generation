@@ -30,10 +30,14 @@ elif _is_serverless:
     # client-side pool would leak connections and exhaust Postgres.
     # Pooling belongs to the provider's pooler (Neon/Supabase/PgBouncer) —
     # point DATABASE_URL at its *pooled* endpoint.
+    #
+    # Fix #9: statement_timeout=10 s kills runaway queries server-side before
+    # they consume the full Vercel function wall-clock budget (60 s).
     engine = create_engine(
         DATABASE_URL,
         poolclass=NullPool,
         pool_pre_ping=True,
+        connect_args={"options": "-c statement_timeout=10000"},
     )
 else:
     engine = create_engine(
