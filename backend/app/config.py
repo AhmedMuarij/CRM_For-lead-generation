@@ -20,11 +20,14 @@ class Settings(BaseSettings):
     #   https://ev-crm-.*-myteam\.vercel\.app
     FRONTEND_ORIGIN_REGEX: str = ""
 
-    @property
+        @property
     def cors_origins(self) -> list[str]:
         origins = [o.strip() for o in self.FRONTEND_ORIGIN.split(",") if o.strip()]
         if "http://localhost:3000" not in origins:
             origins.append("http://localhost:3000")
+        # Always include production frontend
+        if "https://crm-frontend-seven-mu.vercel.app" not in origins:
+            origins.append("https://crm-frontend-seven-mu.vercel.app")
         return origins
 
     class Config:
