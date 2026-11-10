@@ -1,10 +1,12 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
 from app.models.user import User, UserRole
-from app.models.lead import Lead
+from app.models.lead import Lead, LeadStatus
+from app.models.follow_up import FollowUp, FollowUpStatus
 from app.schemas.user import UserCreate, UserUpdate, UserOut, UserOutWithStats, UserPasswordReset
 from app.auth.utils import get_password_hash
 from app.auth.dependencies import require_manager, get_current_user
@@ -92,6 +94,45 @@ def get_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return _user_with_stats(user, db)
+
+
+@router.get("/{user_id}/stats")
+def get_user_stats(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_manager),
+):
+    """Summary numbers for the employee detail page (Total Assigned, Won, Lost, Overdue)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # One GROUP BY for all lead counts instead of one COUNT per status.
+    status_counts = {s: 0 for s in LeadStatus}
+    for lead_status, count in (
+        db.query(Lead.status, func.count(Lead.id))
+        .filter(Lead.assigned_employee_id == user_id)
+        .group_by(Lead.status)
+        .all()
+    ):
+        status_counts[lead_status] = count
+
+    overdue = (
+        db.query(func.count(FollowUp.id))
+        .filter(
+            FollowUp.employee_id == user_id,
+            FollowUp.status == FollowUpStatus.SCHEDULED,
+            FollowUp.scheduled_at < datetime.utcnow(),
+        )
+        .scalar()
+    )
+
+    return {
+        "total_assigned": sum(status_counts.values()),
+        "won": status_counts[LeadStatus.WON],
+        "lost": status_counts[LeadStatus.LOST],
+        "overdue": overdue or 0,
+    }
 
 
 @router.patch("/{user_id}", response_model=UserOut)

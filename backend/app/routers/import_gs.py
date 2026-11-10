@@ -1,15 +1,18 @@
+import heapq
 import json
 import os
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from typing import List
 from app.database import get_db
-from app.models.user import User
-from app.models.lead import Lead, LeadStatus
+from app.models.user import User, UserRole
+from app.models.lead import Lead, LeadStatus, ACTIVE_STATUSES
 from app.models.import_log import ImportLog
 from app.schemas.lead import LeadCreate
 from app.services.phone_utils import normalize_phone
+from app.services import audit
 from app.auth.dependencies import require_manager
 from app.config import get_settings
 
@@ -98,8 +101,60 @@ def _get_gc():
     return gspread.authorize(creds)
 
 
+def _auto_assign(db: Session, leads: list[Lead], manager: User) -> int:
+    """Spread freshly imported leads across active employees.
+
+    Each lead goes to whichever active employee currently has the fewest
+    active (not WON/LOST) leads, so the team's workload evens out instead of
+    a plain round-robin piling more onto someone already busy. Every
+    assignment gets an audit-log entry, same as a manual assign.
+    Must run after db.flush() so the leads have ids.
+    """
+    employees = (
+        db.query(User)
+        .filter(User.role == UserRole.EMPLOYEE, User.active == True)
+        .order_by(User.id)
+        .all()
+    )
+    if not employees or not leads:
+        return 0
+
+    active_counts = dict(
+        db.query(Lead.assigned_employee_id, func.count(Lead.id))
+        .filter(
+            Lead.assigned_employee_id.in_([e.id for e in employees]),
+            Lead.status.in_(ACTIVE_STATUSES),
+        )
+        .group_by(Lead.assigned_employee_id)
+        .all()
+    )
+
+    # (current load, employee id) — ties go to the lower id, so the order is
+    # predictable.
+    by_id = {e.id: e for e in employees}
+    heap = [(active_counts.get(e.id, 0), e.id) for e in employees]
+    heapq.heapify(heap)
+
+    for lead in leads:
+        load, emp_id = heapq.heappop(heap)
+        lead.assigned_employee_id = emp_id
+        audit.record(
+            db,
+            lead_id=lead.id,
+            user=manager,
+            action="ASSIGN",
+            field_name="assigned_employee_id",
+            old_value=None,
+            new_value=emp_id,
+            description=f"Auto-assigned to {by_id[emp_id].name} during import",
+        )
+        heapq.heappush(heap, (load + 1, emp_id))
+    return len(leads)
+
+
 @router.post("/google-sheets")
 def import_from_google_sheets(
+    auto_assign: bool = Query(False, description="Spread new leads across active employees"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_manager),
 ):
@@ -160,6 +215,7 @@ def import_from_google_sheets(
         }
 
     new_leads = 0
+    created_leads: list[Lead] = []
     duplicates = 0
     errors = 0
     error_details = []
@@ -215,6 +271,7 @@ def import_from_google_sheets(
                 status=LeadStatus.NEW,
             )
             db.add(lead)
+            created_leads.append(lead)
             new_leads += 1
 
             # Keep in-memory sets current so duplicates within the same batch
@@ -229,6 +286,8 @@ def import_from_google_sheets(
             error_details.append({"row": i, "error": str(e)})
 
     db.flush()
+
+    auto_assigned = _auto_assign(db, created_leads, current_user) if auto_assign else 0
 
     log = ImportLog(
         imported_by=current_user.id,
@@ -248,6 +307,9 @@ def import_from_google_sheets(
         "duplicates": duplicates,
         "errors": errors,
         "error_details": error_details[:20],  # cap for display
+        # None when auto-assign wasn't requested, so the UI can tell
+        # "not asked for" apart from "asked for, but no active employees".
+        "auto_assigned": auto_assigned if auto_assign else None,
     }
 
 

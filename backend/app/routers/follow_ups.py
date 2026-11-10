@@ -26,6 +26,16 @@ def _enrich(fu: FollowUp) -> FollowUpOut:
     return out
 
 
+def _can_manage(fu: FollowUp, user: User) -> bool:
+    """Managers can manage any follow-up; an employee can manage one that is
+    theirs or that sits on a lead currently assigned to them."""
+    if user.role != UserRole.EMPLOYEE:
+        return True
+    if fu.employee_id == user.id:
+        return True
+    return bool(fu.lead and fu.lead.assigned_employee_id == user.id)
+
+
 @router.post("/api/leads/{lead_id}/follow-ups", response_model=FollowUpOut, status_code=201)
 def schedule_follow_up(
     lead_id: int,
@@ -45,9 +55,14 @@ def schedule_follow_up(
         FollowUp.status == FollowUpStatus.SCHEDULED,
     ).update({"status": FollowUpStatus.CANCELLED})
 
+    # The follow-up belongs to whoever owns the lead, not whoever clicked
+    # "Schedule" — otherwise a follow-up a manager schedules on an employee's
+    # lead never shows up in that employee's lists or overdue counts.
+    owner_id = lead.assigned_employee_id or current_user.id
+
     fu = FollowUp(
         lead_id=lead_id,
-        employee_id=current_user.id,
+        employee_id=owner_id,
         scheduled_at=payload.scheduled_at,
         notes=payload.notes,
         status=FollowUpStatus.SCHEDULED,
@@ -71,7 +86,7 @@ def reschedule_follow_up(
     fu = db.query(FollowUp).options(joinedload(FollowUp.lead), joinedload(FollowUp.employee)).filter(FollowUp.id == fu_id).first()
     if not fu:
         raise HTTPException(status_code=404, detail="Follow-up not found")
-    if current_user.role == UserRole.EMPLOYEE and fu.employee_id != current_user.id:
+    if not _can_manage(fu, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     fu.scheduled_at = payload.scheduled_at
@@ -95,7 +110,7 @@ def complete_follow_up(
     fu = db.query(FollowUp).options(joinedload(FollowUp.lead), joinedload(FollowUp.employee)).filter(FollowUp.id == fu_id).first()
     if not fu:
         raise HTTPException(status_code=404, detail="Follow-up not found")
-    if current_user.role == UserRole.EMPLOYEE and fu.employee_id != current_user.id:
+    if not _can_manage(fu, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
 
     fu.status = FollowUpStatus.COMPLETED
@@ -116,7 +131,7 @@ def cancel_follow_up(
     fu = db.query(FollowUp).options(joinedload(FollowUp.lead), joinedload(FollowUp.employee)).filter(FollowUp.id == fu_id).first()
     if not fu:
         raise HTTPException(status_code=404, detail="Follow-up not found")
-    if current_user.role == UserRole.EMPLOYEE and fu.employee_id != current_user.id:
+    if not _can_manage(fu, current_user):
         raise HTTPException(status_code=403, detail="Access denied")
     fu.status = FollowUpStatus.CANCELLED
     db.commit()

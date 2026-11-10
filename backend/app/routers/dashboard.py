@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models.user import User, UserRole
 from app.models.lead import Lead, LeadStatus
 from app.models.follow_up import FollowUp, FollowUpStatus
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_manager
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -152,7 +152,7 @@ def employee_dashboard(
 @router.get("/manager")
 def manager_dashboard(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_manager),
 ):
     now = datetime.utcnow()
     today_start = datetime.combine(date.today(), datetime.min.time())

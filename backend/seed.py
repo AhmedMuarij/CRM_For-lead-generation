@@ -3,12 +3,22 @@
 Seed script: creates 1 manager, 5 employees, and 100 sample leads
 with varied statuses, calls, follow-ups, and notes.
 
+⚠️  Seeding DELETES every user, lead, call, follow-up, note, audit log and
+import log in the database first. It refuses to run on a database that
+already has users unless you pass --reset.
+
+Passwords: set SEED_PASSWORD to give every demo account that password.
+Without it, each account gets a random password, printed at the end.
+
 Usage (from backend/ directory):
-    python seed.py
+    python seed.py                                  # empty database
+    python seed.py --reset                          # wipe and re-seed
+    SEED_PASSWORD='...' python seed.py --reset      # fixed demo password
 """
 import sys
 import os
 import random
+import secrets
 from datetime import datetime, timedelta
 
 # Windows consoles default to a non-UTF-8 codepage (e.g. cp1252), which can't
@@ -20,7 +30,7 @@ if hasattr(sys.stdout, "reconfigure"):
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import SessionLocal, engine
-from app.models import User, Lead, Call, FollowUp, LeadNote
+from app.models import User, Lead, Call, FollowUp, LeadNote, AuditLog, ImportLog
 from app.models.user import UserRole
 from app.models.lead import LeadStatus
 from app.models.call import CallOutcome
@@ -33,9 +43,26 @@ Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
 
+# ─── Safety check ──────────────────────────────────────────────
+# Seeding wipes everything. Never do that to a database with real users in it
+# unless the person running this explicitly asked for it.
+existing_users = db.query(User).count()
+if existing_users and "--reset" not in sys.argv:
+    print(f"✋ This database already has {existing_users} user(s).")
+    print("   Seeding would DELETE all users, leads, calls, follow-ups, notes,")
+    print("   audit logs and import logs. Nothing was changed.")
+    print("   If you really want to wipe it and load demo data, run:")
+    print("       python seed.py --reset")
+    db.close()
+    sys.exit(1)
+
 print("🌱 Seeding EV CRM database...")
 
 # ─── Clear existing data ───────────────────────────────────────
+# Children first: audit/import logs reference leads and users, so deleting
+# leads or users while they exist fails on Postgres's foreign keys.
+db.query(AuditLog).delete()
+db.query(ImportLog).delete()
 db.query(LeadNote).delete()
 db.query(FollowUp).delete()
 db.query(Call).delete()
@@ -45,24 +72,39 @@ db.commit()
 print("   Cleared existing data")
 
 # ─── Users ────────────────────────────────────────────────────
+# No hardcoded passwords: this repo is public, so anything written here is a
+# login anyone can use on a database seeded with it.
+SEED_PASSWORD = os.getenv("SEED_PASSWORD", "").strip()
+
+
+def demo_password() -> str:
+    return SEED_PASSWORD or secrets.token_urlsafe(9)
+
+
+credentials: list[tuple[str, str, str]] = []  # (label, email, password)
+
+manager_password = demo_password()
 manager = User(
     name="Admin Manager",
     email="manager@evcrm.com",
-    password_hash=get_password_hash("Manager@123"),
+    password_hash=get_password_hash(manager_password),
     role=UserRole.MANAGER,
     active=True,
 )
 db.add(manager)
+credentials.append(("Manager", manager.email, manager_password))
 
 employee_data = [
-    ("Ahmed Khan",    "ahmed@evcrm.com",    "Ahmed@123"),
-    ("Sara Malik",    "sara@evcrm.com",     "Sara@123"),
-    ("Bilal Raza",    "bilal@evcrm.com",    "Bilal@123"),
-    ("Fatima Shaikh", "fatima@evcrm.com",   "Fatima@123"),
-    ("Usman Ali",     "usman@evcrm.com",    "Usman@123"),
+    ("Ahmed Khan",    "ahmed@evcrm.com"),
+    ("Sara Malik",    "sara@evcrm.com"),
+    ("Bilal Raza",    "bilal@evcrm.com"),
+    ("Fatima Shaikh", "fatima@evcrm.com"),
+    ("Usman Ali",     "usman@evcrm.com"),
 ]
 employees = []
-for name, email, pwd in employee_data:
+for name, email in employee_data:
+    pwd = demo_password()
+    credentials.append((name.split()[0], email, pwd))
     emp = User(
         name=name,
         email=email,
@@ -216,9 +258,9 @@ print("─" * 50)
 print("✅ Seed complete!")
 print()
 print("Login credentials:")
-print("  Manager : manager@evcrm.com  /  Manager@123")
-print("  Ahmed   : ahmed@evcrm.com    /  Ahmed@123")
-print("  Sara    : sara@evcrm.com     /  Sara@123")
-print("  Bilal   : bilal@evcrm.com    /  Bilal@123")
-print("  Fatima  : fatima@evcrm.com   /  Fatima@123")
-print("  Usman   : usman@evcrm.com    /  Usman@123")
+for label, email, pwd in credentials:
+    print(f"  {label:<8}: {email:<20} /  {pwd}")
+if not SEED_PASSWORD:
+    print()
+    print("  These passwords were generated randomly and are not stored anywhere")
+    print("  else — save them now. Set SEED_PASSWORD to choose your own.")

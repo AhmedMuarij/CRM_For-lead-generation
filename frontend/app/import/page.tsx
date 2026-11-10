@@ -21,6 +21,7 @@ interface ImportResult {
     duplicates: number;
     errors: number;
     error_details: ImportError[];
+    auto_assigned?: number | null;
 }
 
 interface ImportLogEntry {
@@ -39,6 +40,7 @@ export default function ImportPage() {
     const [importing, setImporting] = useState(false);
     const [result, setResult] = useState<ImportResult | null>(null);
     const [history, setHistory] = useState<ImportLogEntry[]>([]);
+    const [autoAssign, setAutoAssign] = useState(false);
 
     useEffect(() => {
         if (!loading && !isManager) router.push("/dashboard");
@@ -48,9 +50,13 @@ export default function ImportPage() {
     async function runImport() {
         setImporting(true); setResult(null);
         try {
-            const r = await api.post("/api/import/google-sheets");
+            const r = await api.post("/api/import/google-sheets", null, { params: { auto_assign: autoAssign } });
             setResult(r.data);
-            toast.success(`Import complete! ${r.data.new_leads} new leads added.`);
+            if (r.data.auto_assigned === 0 && r.data.new_leads > 0) {
+                toast.error("Leads imported, but there are no active employees to assign them to.");
+            } else {
+                toast.success(`Import complete! ${r.data.new_leads} new leads added.`);
+            }
             api.get("/api/import/history").then(r => setHistory(r.data));
         } catch (err: unknown) {
             const message = axios.isAxiosError(err) ? err.response?.data?.detail : undefined;
@@ -72,6 +78,18 @@ export default function ImportPage() {
                         <h2 className="font-semibold text-slate-700">Import from Google Sheets</h2>
                         <p className="text-sm text-slate-500 mt-1">Connects to the configured Google Sheet, reads all rows, deduplicates, and creates new leads. Existing leads are never overwritten.</p>
                     </div>
+                    <label className="flex items-start gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={autoAssign}
+                            onChange={e => setAutoAssign(e.target.checked)}
+                            className="mt-0.5 w-4 h-4 accent-emerald-600"
+                        />
+                        <span>
+                            <span className="block text-sm font-medium text-slate-700">Auto-assign new leads to employees</span>
+                            <span className="block text-xs text-slate-500 mt-0.5">Each new lead goes to the active employee with the fewest open leads. Leave unchecked to assign them yourself.</span>
+                        </span>
+                    </label>
                     <button
                         onClick={runImport}
                         disabled={importing}
@@ -96,6 +114,9 @@ export default function ImportPage() {
                                 ["New Leads Created", result.new_leads, "text-emerald-700 font-bold"],
                                 ["Duplicates Skipped", result.duplicates, "text-amber-600"],
                                 ["Errors", result.errors, "text-red-600"],
+                                ...(result.auto_assigned != null
+                                    ? [["Auto-Assigned", result.auto_assigned, "text-indigo-600 font-semibold"]]
+                                    : []),
                             ].map(([l, v, cls]) => (
                                 <div key={l as string} className="flex justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
                                     <span className="text-sm text-slate-500">{l}</span>

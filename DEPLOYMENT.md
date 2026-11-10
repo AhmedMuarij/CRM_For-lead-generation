@@ -51,8 +51,13 @@ python -m venv .venv
 # PowerShell
 $env:DATABASE_URL="postgresql://...-pooler.../dbname?sslmode=require"
 python -m alembic upgrade head
-python seed.py      # optional: creates the demo manager + employee logins
+python seed.py      # optional, EMPTY database only: creates demo logins + 100 sample leads
 ```
+
+`seed.py` deletes everything before loading demo data, so it refuses to run
+on a database that already has users. Only add `--reset` if you really mean
+to wipe that database. It prints the demo logins' passwords at the end
+(random unless you set `SEED_PASSWORD`).
 
 Re-run `alembic upgrade head` the same way whenever a new migration lands.
 
@@ -110,8 +115,10 @@ frontend URL, and redeploy it so CORS accepts the browser's requests.
   the service account key's **raw JSON** into `GOOGLE_SERVICE_ACCOUNT_JSON`
   (locally a file path also works). A very large sheet can exceed the
   function's 60s limit — import in batches if that happens.
-- **Seeded logins are demo credentials.** Change the passwords immediately
-  if you seed a database that's reachable from the internet.
+- **Seeded logins are demo credentials.** If you set `SEED_PASSWORD` for a
+  public demo, remember everyone who knows it can log in as the manager.
+  A manager can change any account's password with
+  `PATCH /api/users/{id}/password`.
 
 ## Running locally
 

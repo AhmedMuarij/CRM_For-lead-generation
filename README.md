@@ -229,7 +229,8 @@ Run database migrations:
 python -m alembic upgrade head
 ```
 
-Seed demo data if required:
+Seed demo data if required (empty database only, since it deletes existing
+data first; it prints the demo logins' passwords when it finishes):
 
 ``` bash
 python seed.py

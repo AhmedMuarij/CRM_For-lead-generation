@@ -177,6 +177,15 @@ def assign_lead(
         raise HTTPException(status_code=404, detail="Employee not found or inactive")
     previous_employee = lead.assigned_employee
     lead.assigned_employee_id = payload.employee_id
+
+    # Pending follow-ups move with the lead, so the new owner sees them and the
+    # previous owner's overdue count stops including a lead they no longer have.
+    # Completed/cancelled ones keep their original employee as history.
+    db.query(FollowUp).filter(
+        FollowUp.lead_id == lead.id,
+        FollowUp.status == FollowUpStatus.SCHEDULED,
+    ).update({"employee_id": employee.id}, synchronize_session=False)
+
     audit.record(
         db,
         lead_id=lead.id,
