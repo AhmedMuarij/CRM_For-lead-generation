@@ -1,7 +1,7 @@
 import heapq
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -52,9 +52,47 @@ COLUMN_MAP = {
     "created at":           "source_created_at",
     "timestamp":            "source_created_at",
     "email":                "email",
+
+    # Facebook / Instagram Lead Ads export (the format of the INVEX EV Leads
+    # sheet). Columns not listed here — ad_name, adset_name, form_name,
+    # is_organic, lead_status, … — are kept in raw_source_data.
+    "full_name":            "customer_name",
+    "full name":            "customer_name",
+    "phone_number":         "phone",
+    "phone number":         "phone",
+    "created_time":         "source_created_at",
+    "platform":             "source",
+    "campaign_name":        "campaign",
+    "how_many_ev_units_would_you_like_to_start_with?": "units",
+    "choose_your_business_model":                      "operation_type",
+    "best_time_to_contact_you":                        "preferred_call_time",
 }
 
 KNOWN_CRM_FIELDS = set(COLUMN_MAP.values())
+
+
+def _clean_value(crm_field: str, value: str) -> str:
+    """Undo Facebook Lead Ads export quirks so the CRM shows clean values."""
+    if crm_field == "phone" and value[:2].lower() == "p:":
+        # "p:+923001234567" → "+923001234567" (the prefix breaks tel: links)
+        value = value[2:].strip()
+    elif crm_field == "units":
+        # Form answers come through as "10_units_" — drop stray underscores.
+        value = value.strip("_")
+    return value
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    """Parse an ISO timestamp from the sheet into naive UTC, like the rest of
+    the app stores times. Facebook exports carry an offset, e.g.
+    2026-08-11T04:43:21-05:00."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 def _map_row(row: dict) -> dict:
@@ -66,7 +104,7 @@ def _map_row(row: dict) -> dict:
         col_lower = col.strip().lower()
         crm_field = COLUMN_MAP.get(col_lower)
         if crm_field and val:
-            mapped[crm_field] = str(val).strip()
+            mapped[crm_field] = _clean_value(crm_field, str(val).strip())
         elif val:
             raw_extras[col] = str(val).strip()
 
@@ -243,10 +281,7 @@ def import_from_google_sheets(
             # Parse source timestamp if present
             source_created_at = None
             if mapped.get("source_created_at"):
-                try:
-                    source_created_at = datetime.fromisoformat(str(mapped["source_created_at"]))
-                except Exception:
-                    pass
+                source_created_at = _parse_timestamp(str(mapped["source_created_at"]))
 
             lead = Lead(
                 external_lead_id=str(ext_id) if ext_id else None,
